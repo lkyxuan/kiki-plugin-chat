@@ -1,0 +1,11 @@
+{
+  "kiki": "plugin",
+  "name": "社交通道",
+  "version": "0.1.0",
+  "title": "通道",
+  "page": "page/index.html",
+  "needs": { "network": false },
+  "card": true,
+  "services": [{ "name": "cc-connect", "cmd": "bin/cc-connect", "args": ["--config", "data/config.toml"], "restart": true }],
+  "notify": { "cmd": "skills/chat-setup/notify.sh", "channels": ["weixin", "feishu"] }
+}

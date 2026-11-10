@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>通道</title>
+<style>
+  * { box-sizing: border-box; }
+  body { padding: 24px; margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--font, -apple-system, sans-serif); }
+  .wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  h1 small { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+  .intro { color: var(--muted); font-size: 13px; margin: 0; }
+  button { font: inherit; border: 0; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .btn { padding: 6px 12px; border-radius: 8px; background: var(--fill); color: var(--text); font-size: 13px; }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); color: var(--on-accent, #fff); }
+  .ch { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+  .ch b { font-size: 16px; font-weight: 600; }
+  .ch .s { font-size: 13px; color: var(--muted); flex: 1; min-width: 0; }
+  .ch .s.ok { color: var(--ok); } .ch .s.err { color: var(--err); }
+  .qr { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .qr .code { width: 200px; height: 200px; background: #fff; border-radius: 8px; padding: 8px; flex: none; }
+  .qr .code svg { width: 100%; height: 100%; display: block; }
+  .qr p { margin: 0; font-size: 13px; color: var(--muted); flex: 1; min-width: 180px; }
+  .qr p b { color: var(--text); font-size: 15px; display: block; margin-bottom: 4px; }
+  .warn { font-size: 13px; color: var(--muted); background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; }
+  .busy { font-size: 13px; color: var(--muted); }
+  #list { display: flex; flex-direction: column; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>聊天软件<small id="ver"></small></h1>
+  <p class="intro">接上之后，你在微信、飞书里说的话就交给奇奇，等于在 Kiki 里说一句；奇奇后来又说的也发回去。只认你自己的账号。</p>
+  <div id="qr"></div>
+  <div id="list"></div>
+  <div id="note"></div>
+</div>
+<script src="qrcode.js"></script>
+<script>
+const NAMES = { weixin: "微信", feishu: "飞书" };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let st = null, qr = null, pending = false, asked = "";
+const readJson = async (f) => { try { const t = await kiki.read(f); return t ? JSON.parse(t) : null; } catch { return null; } };
+
+async function load() {
+  st = await readJson("status.json");
+  qr = await readJson("weixin-qr.txt");
+  pending = !!(await readJson("weixin-pending.json")); // 后台在扫码：二维码可能还没出来，要一直看
+  if (qr && Date.now() - Date.parse(qr.at) > 6 * 60000) qr = null; // 过期的二维码不显示
+  render();
+}
+function qrSvg(text) {
+  const q = qrcode(0, "M"); q.addData(text); q.make();
+  return q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+}
+function render() {
+  document.getElementById("ver").textContent = st?.installed ? `cc-connect ${st.version || ""}` : "";
+  document.getElementById("qr").innerHTML = qr ? `<div class="qr"><div class="code">${qrSvg(qr.url)}</div><p><b>用微信扫一扫</b>扫完在手机上点确认，这里会自己变成“接上了”。二维码几分钟会过期，过期了再点一次“接微信”。</p></div>` : "";
+  const rows = Object.entries(NAMES).map(([id, name]) => {
+    const c = st?.channels?.[id];
+    const [cls, text] = c?.on ? ["ok", "接上了，只认你自己的账号"] : c?.error ? ["err", c.error] : id === "weixin" && (qr || pending) ? ["", qr ? "等你扫码…" : "正在拿二维码…"] : ["", "还没接"];
+    const act = c?.on ? `<button class="btn" data-ask="断开${name}">断开</button>` : `<button class="btn primary" data-ask="接${name}" ${asked === `接${name}` || (id === "weixin" && (qr || pending)) ? "disabled" : ""}>接${name}</button>`;
+    return `<div class="ch"><b>${name}</b><span class="s ${cls}">${esc(text)}</span>${act}</div>`;
+  });
+  document.getElementById("list").innerHTML = rows.join("");
+  document.getElementById("note").innerHTML = asked ? `<div class="busy">已经交给社交通道宝：${esc(asked)}。它会在对话里跟你说下一步。</div>` : !st?.installed ? `<div class="warn">第一次用会先下载 cc-connect（开源的聊天软件网桥，约 16MB），只放在这个宝的文件夹里。</div>` : "";
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-ask]");
+  if (!b) return;
+  asked = b.dataset.ask;
+  kiki.ask(asked);
+  render();
+});
+window.addEventListener("kiki:changed", () => { asked = ""; load(); });
+setInterval(() => { if (!document.hidden && (qr || pending || asked)) load(); }, 2000); // 扫码时勤看一眼
+load();
+</script>
+</body>
+</html>
